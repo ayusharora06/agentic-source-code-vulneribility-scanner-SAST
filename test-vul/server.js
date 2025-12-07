@@ -12,7 +12,7 @@ const { exec } = require('child_process');
 
 const app = express();
 app.use(express.json());
-
+console.log("hello")
 // VULN: Hardcoded secret key
 const JWT_SECRET = 'super_secret_key_123';
 
