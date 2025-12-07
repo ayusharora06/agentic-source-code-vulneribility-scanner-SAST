@@ -1,0 +1,65 @@
+# Core web framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+
+# WebSocket support
+websockets==12.0
+
+# Database
+sqlalchemy==2.0.23
+# sqlite3 is built into Python - no need to install
+
+# Async support
+asyncio-mqtt==0.16.2
+aiofiles==23.2.1
+aiosqlite
+
+# HTTP requests
+httpx==0.25.2
+requests==2.31.0
+
+# Data validation and serialization
+pydantic==2.5.0
+
+# Environment management
+python-dotenv==1.0.0
+
+# Logging and monitoring
+structlog==23.2.0
+
+# Date/time handling
+python-dateutil==2.8.2
+
+# JSON handling
+orjson==3.9.10
+
+# CORS support
+fastapi-cors==0.0.6
+
+# Development tools
+pytest==7.4.3
+pytest-asyncio==0.21.1
+black==23.11.0
+isort==5.12.0
+
+# Security
+cryptography==46.0.3
+passlib[bcrypt]==1.7.4
+
+# AI model integrations (litellm unified API)
+litellm==1.52.9
+openai
+anthropic==0.7.7
+
+# Code parsing
+tree-sitter==0.23.0
+
+# Serialization
+jsonpickle==3.0.4
+
+python-multipart
+pydantic-settings
+
+# Static analysis tools (optional - install separately)
+# infer  # Install via: pip install infer-framework
+# clang  # Install via system package manager
