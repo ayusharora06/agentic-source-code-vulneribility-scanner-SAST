@@ -614,9 +614,100 @@ async def rebuild_stats():
     return {"message": "Stats rebuilt", "stats": stats}
 
 
+def get_commit_diff(project_path: str, commit_id: str, compare_to: str = None) -> Tuple[Optional[str], Optional[str], Optional[Dict[str, str]], Optional[List[int]]]:
+    """Get diff, commit message, full file contents, and changed line numbers"""
+    try:
+        if not os.path.isdir(project_path):
+            return None, None, None, None
+        
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        if result.returncode != 0:
+            return None, None, None, None
+        
+        if compare_to:
+            diff_cmd = ['git', 'diff', compare_to, commit_id]
+            files_cmd = ['git', 'diff', '--name-only', compare_to, commit_id]
+        else:
+            diff_cmd = ['git', 'show', commit_id, '--format=', '--patch']
+            files_cmd = ['git', 'show', commit_id, '--format=', '--name-only']
+        
+        diff_result = subprocess.run(
+            diff_cmd,
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        diff_content = diff_result.stdout.strip()
+        
+        msg_result = subprocess.run(
+            ['git', 'log', '-1', '--format=%B', commit_id],
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        commit_message = msg_result.stdout.strip()
+        
+        files_result = subprocess.run(
+            files_cmd,
+            cwd=project_path,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        changed_files = [f.strip() for f in files_result.stdout.strip().split('\n') if f.strip()]
+        
+        file_contents = {}
+        for file_path in changed_files[:20]:
+            full_path = os.path.join(project_path, file_path)
+            if os.path.isfile(full_path):
+                try:
+                    with open(full_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        file_contents[file_path] = f.read()
+                except Exception:
+                    pass
+        
+        changed_lines = parse_diff_line_numbers(diff_content)
+        
+        return diff_content, commit_message, file_contents, changed_lines
+    except Exception:
+        return None, None, None, None
+
+
+def parse_diff_line_numbers(diff_content: str) -> Dict[str, List[int]]:
+    """Extract changed line numbers from diff content"""
+    import re
+    changed_lines = {}
+    current_file = None
+    current_line = 0
+    
+    for line in diff_content.split('\n'):
+        if line.startswith('+++ b/'):
+            current_file = line[6:]
+            changed_lines[current_file] = []
+        elif line.startswith('@@ '):
+            match = re.search(r'\+(\d+)', line)
+            if match:
+                current_line = int(match.group(1))
+        elif current_file and line.startswith('+') and not line.startswith('+++'):
+            changed_lines[current_file].append(current_line)
+            current_line += 1
+        elif current_file and not line.startswith('-'):
+            current_line += 1
+    
+    return changed_lines
+
+
 @app.post("/api/v1/analysis/diff")
 async def analyze_diff(request: Dict[str, Any], background_tasks: BackgroundTasks):
-    """Analyze a code diff for security issues"""
+    """Analyze a git commit for security issues"""
     config = get_llm_config()
     if not config.has_any_key():
         raise HTTPException(
@@ -624,32 +715,44 @@ async def analyze_diff(request: Dict[str, Any], background_tasks: BackgroundTask
             detail="No LLM API keys configured"
         )
     
-    diff_content = request.get("diff")
-    file_path = request.get("file_path", "unknown")
-    commit_message = request.get("commit_message", "")
+    project_path = request.get("project_path")
+    commit_id = request.get("commit_id")
+    compare_to = request.get("compare_to")
     session_id = request.get("session_id", f"diff_{int(time.time())}")
     
-    if not diff_content:
-        raise HTTPException(status_code=400, detail="Diff content is required")
+    if not project_path or not commit_id:
+        raise HTTPException(status_code=400, detail="project_path and commit_id are required")
     
-    background_tasks.add_task(run_diff_analysis, session_id, diff_content, file_path, commit_message)
+    if not os.path.isdir(project_path):
+        raise HTTPException(status_code=400, detail="Invalid project path")
+    
+    diff_content, commit_message, file_contents, changed_lines = get_commit_diff(project_path, commit_id, compare_to)
+    
+    if not diff_content:
+        raise HTTPException(status_code=400, detail="Could not get diff for commit. Check project path and commit ID.")
+    
+    background_tasks.add_task(run_diff_analysis, session_id, diff_content, project_path, commit_message, commit_id, file_contents, changed_lines)
     
     return {
         "session_id": session_id,
         "status": "started",
-        "analysis_type": "diff"
+        "analysis_type": "diff",
+        "commit_id": commit_id
     }
 
 
-async def run_diff_analysis(session_id: str, diff_content: str, file_path: str, commit_message: str):
+async def run_diff_analysis(session_id: str, diff_content: str, project_path: str, commit_message: str, commit_id: str = "", file_contents: Dict[str, str] = None, changed_lines: Dict[str, List[int]] = None):
     """Run diff analysis pipeline"""
     logger.info(f"Starting diff analysis for session {session_id}")
     status = get_status_service()
+    file_contents = file_contents or {}
+    changed_lines = changed_lines or {}
     
     report = {
         "session_id": session_id,
         "analysis_type": "diff",
-        "file_path": file_path,
+        "project_path": project_path,
+        "commit_id": commit_id,
         "commit_message": commit_message,
         "started_at": time.time(),
         "status": "running",
@@ -660,26 +763,28 @@ async def run_diff_analysis(session_id: str, diff_content: str, file_path: str, 
     }
     
     try:
-        await status.emit_analysis_started(session_id, file_path)
-        await status.emit_step(session_id, "diff_analyzer", "started", "Analyzing diff for security issues...")
+        await status.emit_analysis_started(session_id, project_path)
+        await status.emit_step(session_id, "diff_analyzer", "started", "Analyzing commit for security issues...")
         
         diff_analyzer = DiffAnalyzerAgent()
         
-        if commit_message:
-            vulnerabilities = await diff_analyzer.analyze_commit(diff_content, commit_message)
-        else:
-            vulnerabilities = await diff_analyzer.analyze_diff(diff_content, file_path)
+        all_vulnerabilities = await diff_analyzer.analyze_commit_with_context(
+            diff_content, 
+            commit_message, 
+            file_contents, 
+            changed_lines
+        )
         
-        report["vulnerabilities"] = [v.to_dict() for v in vulnerabilities]
+        report["vulnerabilities"] = [v.to_dict() for v in all_vulnerabilities]
         report["cost"] = diff_analyzer.execution.total_cost if diff_analyzer.execution else 0
         
-        await status.emit_step(session_id, "diff_analyzer", "completed", f"Found {len(vulnerabilities)} issues", {"count": len(vulnerabilities)})
+        await status.emit_step(session_id, "diff_analyzer", "completed", f"Found {len(all_vulnerabilities)} issues", {"count": len(all_vulnerabilities)})
         
-        for v in vulnerabilities:
+        for v in all_vulnerabilities:
             await status.emit_vulnerability_found(session_id, v.to_dict())
         
         report["summary"] = diff_analyzer.get_results()["by_severity"]
-        report["summary"]["total_vulnerabilities"] = len(vulnerabilities)
+        report["summary"]["total_vulnerabilities"] = len(all_vulnerabilities)
         report["status"] = "completed"
         report["completed_at"] = time.time()
         

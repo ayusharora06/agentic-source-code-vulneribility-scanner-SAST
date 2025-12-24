@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { GitBranch, ArrowLeft, AlertCircle, CheckCircle, Play, Shield, Clock } from 'lucide-react';
+import { GitBranch, ArrowLeft, AlertCircle, CheckCircle, Play, Shield, Clock, FolderOpen } from 'lucide-react';
 import Link from 'next/link';
 import { useStatusSocket } from '@/hooks/useStatusSocket';
 
@@ -11,20 +11,10 @@ interface StatusLog {
   message: string;
 }
 
-const SAMPLE_DIFF = `diff --git a/auth.py b/auth.py
-index 1234567..abcdefg 100644
---- a/auth.py
-+++ b/auth.py
-@@ -10,7 +10,7 @@ def authenticate(username, password):
-     # Vulnerable: SQL Injection
--    query = f"SELECT * FROM users WHERE username='{username}'"
-+    query = "SELECT * FROM users WHERE username=?"
-     cursor.execute(query, (username,))
-     user = cursor.fetchone()`;
-
 export default function DiffAnalysisPage() {
-  const [diff, setDiff] = useState('');
-  const [commitMessage, setCommitMessage] = useState('');
+  const [projectPath, setProjectPath] = useState('');
+  const [commitId, setCommitId] = useState('');
+  const [compareTo, setCompareTo] = useState('');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'analyzing' | 'complete' | 'error'>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -55,8 +45,8 @@ export default function DiffAnalysisPage() {
   }, [lastEvent, sessionId]);
 
   const startAnalysis = async () => {
-    if (!diff.trim()) {
-      setError('Please enter a diff to analyze');
+    if (!projectPath.trim() || !commitId.trim()) {
+      setError('Please enter project path and commit ID');
       setStatus('error');
       return;
     }
@@ -71,8 +61,9 @@ export default function DiffAnalysisPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          diff: diff,
-          commit_message: commitMessage,
+          project_path: projectPath.trim(),
+          commit_id: commitId.trim(),
+          compare_to: compareTo.trim() || undefined,
         }),
       });
 
@@ -83,7 +74,7 @@ export default function DiffAnalysisPage() {
 
       const data = await response.json();
       setSessionId(data.session_id);
-      setLogs([{ time: new Date().toLocaleTimeString(), event: 'started', message: 'Diff analysis started' }]);
+      setLogs([{ time: new Date().toLocaleTimeString(), event: 'started', message: `Analyzing commit ${commitId}` }]);
     } catch (err) {
       setStatus('error');
       setError(err instanceof Error ? err.message : 'Unknown error');
@@ -96,11 +87,6 @@ export default function DiffAnalysisPage() {
     setError(null);
     setLogs([]);
     setSummary(null);
-  };
-
-  const loadSampleDiff = () => {
-    setDiff(SAMPLE_DIFF);
-    setCommitMessage('Fix SQL injection vulnerability in auth');
   };
 
   const getEventIcon = (event: string) => {
@@ -127,53 +113,63 @@ export default function DiffAnalysisPage() {
         </div>
 
         <div className="card mb-6">
-          <h1 className="text-2xl font-bold text-theme-text-primary mb-2">Diff Analysis</h1>
-          <p className="text-theme-text-secondary mb-6">Analyze git diffs and commits for security vulnerabilities</p>
+          <h1 className="text-2xl font-bold text-theme-text-primary mb-2">Commit Analysis</h1>
+          <p className="text-theme-text-secondary mb-6">Analyze git commits for security vulnerabilities</p>
 
           {status === 'idle' && (
             <div>
-              <div className="flex justify-end mb-4">
-                <button onClick={loadSampleDiff} className="text-sm text-theme-primary hover:underline">
-                  Load Sample Diff
-                </button>
+              <div className="mb-4">
+                <label className="block text-sm font-medium text-theme-text-primary mb-2">Project Path</label>
+                <div className="relative">
+                  <FolderOpen className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-theme-text-secondary" />
+                  <input
+                    type="text"
+                    value={projectPath}
+                    onChange={(e) => setProjectPath(e.target.value)}
+                    placeholder="/path/to/your/git/repository"
+                    className="w-full pl-10 pr-4 py-2 border border-theme-border rounded-lg bg-theme-bg-primary text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-primary font-mono text-sm"
+                  />
+                </div>
               </div>
 
               <div className="mb-4">
-                <label className="block text-sm font-medium text-theme-text-primary mb-2">Commit Message (optional)</label>
-                <input
-                  type="text"
-                  value={commitMessage}
-                  onChange={(e) => setCommitMessage(e.target.value)}
-                  placeholder="e.g., Fix authentication bug"
-                  className="w-full px-4 py-2 border border-theme-border rounded-lg bg-theme-bg-primary text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-primary"
-                />
+                <label className="block text-sm font-medium text-theme-text-primary mb-2">Commit ID</label>
+                <div className="relative">
+                  <GitBranch className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-theme-text-secondary" />
+                  <input
+                    type="text"
+                    value={commitId}
+                    onChange={(e) => setCommitId(e.target.value)}
+                    placeholder="abc123 or HEAD or branch-name"
+                    className="w-full pl-10 pr-4 py-2 border border-theme-border rounded-lg bg-theme-bg-primary text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-primary font-mono text-sm"
+                  />
+                </div>
+                <p className="text-xs text-theme-text-secondary mt-1">
+                  Commit hash, branch name, or HEAD
+                </p>
               </div>
 
               <div className="mb-6">
-                <label className="block text-sm font-medium text-theme-text-primary mb-2">Diff Content</label>
-                <div className="relative">
-                  <GitBranch className="absolute left-3 top-3 h-5 w-5 text-theme-text-secondary" />
-                  <textarea
-                    value={diff}
-                    onChange={(e) => setDiff(e.target.value)}
-                    placeholder="Paste your git diff here..."
-                    rows={14}
-                    className="w-full pl-10 pr-4 py-3 border border-theme-border rounded-lg bg-theme-bg-primary text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-primary font-mono text-sm"
-                    spellCheck={false}
-                  />
-                </div>
-                <p className="text-xs text-theme-text-secondary mt-2">
-                  {diff.split('\n').length} lines
+                <label className="block text-sm font-medium text-theme-text-primary mb-2">Compare To (optional)</label>
+                <input
+                  type="text"
+                  value={compareTo}
+                  onChange={(e) => setCompareTo(e.target.value)}
+                  placeholder="HEAD~1 or main or specific-commit"
+                  className="w-full px-4 py-2 border border-theme-border rounded-lg bg-theme-bg-primary text-theme-text-primary focus:outline-none focus:ring-2 focus:ring-theme-primary font-mono text-sm"
+                />
+                <p className="text-xs text-theme-text-secondary mt-1">
+                  Leave empty to analyze single commit, or specify base for comparison
                 </p>
               </div>
 
               <button
                 onClick={startAnalysis}
-                disabled={!diff.trim()}
+                disabled={!projectPath.trim() || !commitId.trim()}
                 className="w-full btn-primary flex items-center justify-center gap-2 disabled:opacity-50"
               >
                 <Play className="h-5 w-5" />
-                Analyze Diff
+                Analyze Commit
               </button>
             </div>
           )}
@@ -182,7 +178,7 @@ export default function DiffAnalysisPage() {
             <div>
               <div className="flex items-center gap-3 mb-4">
                 <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-theme-primary"></div>
-                <span className="text-theme-text-primary font-medium">Analyzing diff...</span>
+                <span className="text-theme-text-primary font-medium">Analyzing commit {commitId}...</span>
               </div>
             </div>
           )}

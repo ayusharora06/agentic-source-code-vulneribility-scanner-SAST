@@ -161,7 +161,18 @@ export default function ReportsPage() {
                         return (
                           <div key={vuln.vuln_id} className={`p-4 rounded-lg border ${getSeverityColor(vuln.severity)}`}>
                             <div className="flex justify-between mb-2">
-                              <span className="font-medium">{vuln.vuln_type}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">{vuln.vuln_type}</span>
+                                {vuln.in_diff !== undefined && (
+                                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                                    vuln.in_diff 
+                                      ? 'bg-red-100 text-red-700 border border-red-300' 
+                                      : 'bg-yellow-100 text-yellow-700 border border-yellow-300'
+                                  }`}>
+                                    {vuln.in_diff ? 'In Commit' : 'Pre-existing'}
+                                  </span>
+                                )}
+                              </div>
                               <span className="text-xs uppercase font-bold">{vuln.severity}</span>
                             </div>
                             <p className="text-sm mb-2">{vuln.description}</p>
